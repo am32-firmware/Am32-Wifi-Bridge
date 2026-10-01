@@ -248,16 +248,15 @@ void loop() {
     // Mirror the input in 50ms slices, then re-check the WiFi.
     passthrough.run(50);
 
-    // Report pulses dropped because an interrupt may have delayed them.
+    // Report the locked signal period and pulses dropped because an
+    // interrupt may have delayed them.
     static uint32_t lastReport = 0;
-    static uint32_t lastDropped = 0;
     if (millis() - lastReport > 5000) {
       lastReport = millis();
-      if (passthrough.droppedPulses() != lastDropped) {
-        lastDropped = passthrough.droppedPulses();
-        Serial.printf("passthrough: %lu forwarded, %lu dropped\n",
-                      (unsigned long)passthrough.forwardedPulses(), (unsigned long)lastDropped);
-      }
+      Serial.printf("passthrough: period %lu us, %lu forwarded, %lu dropped\n",
+                    (unsigned long)passthrough.periodUs(),
+                    (unsigned long)passthrough.forwardedPulses(),
+                    (unsigned long)passthrough.droppedPulses());
     }
     return;
   }

@@ -24,29 +24,42 @@ ESC signal pin in a tight register-polling loop, about 0.1-0.2 us latency.
 With nothing on GPIO 6, the pull-down keeps the ESC signal low, so an ESC
 powered in this state starts its firmware normally.
 
-* **Pulses that might be corrupted are dropped, not forwarded.** Between
-  pulses, the loop turns interrupts off only for each single sample
-  (`csrrci`/`csrrs` on `mstatus`, a couple of instructions), and it
-  timestamps every sample with the cycle counter. A rising edge is forwarded
-  only when both of these are true:
-  * the previous sample saw the input low no more than one normal loop pass
-    earlier. The pass time is calibrated at boot, plus 250 ns slack. This
-    proves the edge wasn't seen late because an interrupt or the WiFi task
-    ran.
-  * the input had been verifiably low for 20 us before the edge, so it is the
-    start of a pulse or DShot frame and not the middle of one.
+* **Interrupts are scheduled between pulses.** The passthrough learns the
+  signal period from the rising edges. It locks on after 3 matching periods
+  (60 us - 60 ms) and follows slow drift. From then on, interrupts are held
+  off in a guard window around every expected rising edge (period/16,
+  30 us - 2 ms) and during the pulse itself. Interrupts that come due in that
+  time run in the gap after the pulse.
 
-  Otherwise the output stays low until the input has been idle again, so the
-  whole pulse or DShot frame is skipped. For PWM that means the ESC keeps its
-  previous value for one frame. For DShot one frame is missed.
+  This stops periodic interrupts (RTOS tick, WiFi timers) from beating
+  against the signal. Without it, a 50 Hz signal whose rising edge sits near
+  the 1 ms tick loses every pulse until crystal drift of a few ppm moves it
+  away, which can take seconds.
+  If an expected pulse doesn't come, the window closes after the guard.
+  After 4 misses the schedule is dropped until the period is re-learned.
+* **Pulses that might be corrupted are dropped, not forwarded.** This matters
+  before lock-on, for irregular signals, and for edges earlier than the
+  guard window. Between pulses, the loop turns interrupts off only for each
+  single sample (`csrrci`/`csrrs` on `mstatus`) and timestamps every sample
+  with the cycle counter. A rising edge is forwarded only when both of these
+  are true:
+  * the previous sample saw the input low no more than one normal loop pass
+    earlier. The pass time is calibrated at boot. This proves an interrupt
+    didn't delay the edge.
+  * the input had been verifiably low for 10 us before the edge, so it is
+    the start of a pulse or DShot frame and not the middle of one.
+
+  Otherwise the output stays low until the input is idle again, so the
+  whole pulse or DShot frame is skipped. Dropped pulses still teach the
+  scheduler the period, so a signal that starts right on top of an interrupt
+  still locks on (about 100 ms at 50 Hz).
 * A forwarded pulse or frame runs entirely with interrupts off (at most
   5 ms), so its width is copied exactly. A pulse longer than 5 ms (input
   stuck high) is cut off and the output driven low.
-* Mirroring runs in 50 ms slices. Between slices the sketch checks whether
-  someone has joined the WiFi. A pulse already in progress when a slice
-  starts is dropped.
-* The USB serial log reports forwarded/dropped counts every 5 s when drops
-  happened.
+* Mirroring runs in 50 ms slices. It only returns to `loop()` for the WiFi
+  check when there are at least 300 us before the next expected pulse.
+* The USB serial log prints `passthrough: period N us, F forwarded, D dropped`
+  every 5 s. A period of 0 means it is not locked on.
 * Works for PWM/servo, Oneshot, Multishot and normal DShot. **Bidirectional
   DShot does not work**, because the ESC's telemetry reply can't travel back
   through a one-way copy.
