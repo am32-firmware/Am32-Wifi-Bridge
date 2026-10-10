@@ -43,7 +43,19 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .f:last-child{border-bottom:0}
 .f label{min-width:0}
 .f output{font-variant-numeric:tabular-nums;color:var(--muted);text-align:right;min-width:70px}
-.f input[type=range]{grid-column:1/-1;width:100%}
+/* Sliders are dragged by script (see guardSlider), so the native control
+   ignores the pointer and the thumb has a known size to hit-test against. */
+.f input[type=range]{grid-column:1/-1;width:100%;margin:0;height:28px;background:transparent;
+  -webkit-appearance:none;appearance:none;pointer-events:none}
+.f input[type=range]::-webkit-slider-runnable-track{height:6px;border-radius:3px;background:var(--line)}
+.f input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;margin-top:-8px;
+  border-radius:50%;background:var(--accent);border:2px solid var(--card)}
+.f input[type=range]::-moz-range-track{height:6px;border-radius:3px;background:var(--line)}
+.f input[type=range]::-moz-range-thumb{width:22px;height:22px;box-sizing:border-box;
+  border-radius:50%;background:var(--accent);border:2px solid var(--card)}
+.f input[type=range]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.f input[type=range]:disabled::-webkit-slider-thumb{background:var(--muted)}
+.f input[type=range]:disabled::-moz-range-thumb{background:var(--muted)}
 .f select,.f input[type=number]{font:inherit;padding:4px 6px;border-radius:6px;border:1px solid var(--line);background:var(--field);color:var(--text);max-width:210px}
 .f.check{grid-template-columns:auto 1fr}
 .f.disabled{opacity:.5}
@@ -199,10 +211,55 @@ function buildForm(){
     }else{
       row.innerHTML='<label for="'+id+'">'+f.l+'</label><output id="o'+f.o+'"></output><input type="range" id="'+id+'" min="'+f.min+'" max="'+f.max+'">';
       row.querySelector('input').addEventListener('input',()=>showValue(f));
+      guardSlider(row.querySelector('input'));
     }
     groups[f.g].appendChild(row);
     $(id).addEventListener('change',updateDependencies);
   }
+}
+// A slider only moves when the press starts on its thumb, so a tap or swipe
+// on the track while scrolling the page can never change a value. Keyboard
+// arrows still work on the focused slider.
+const THUMB=22;  // thumb width in px, matches the CSS
+function thumbCenter(el){
+  const r=el.getBoundingClientRect(),min=+el.min,max=+el.max;
+  const frac=max>min?(+el.value-min)/(max-min):0;
+  return r.left+THUMB/2+frac*(r.width-THUMB);
+}
+function onThumb(el,x,y){
+  const r=el.getBoundingClientRect();
+  return y>=r.top-8&&y<=r.bottom+8&&Math.abs(x-thumbCenter(el))<=THUMB*0.75;
+}
+function guardSlider(el){
+  const row=el.parentNode;
+  let drag=null;  // {id, offset from thumb centre, value at start}
+  // Stop the page scrolling only for a touch that grabbed the thumb.
+  row.addEventListener('touchstart',e=>{
+    const t=e.touches[0];
+    if(!el.disabled&&e.touches.length===1&&onThumb(el,t.clientX,t.clientY))e.preventDefault();
+  },{passive:false});
+  row.addEventListener('pointerdown',e=>{
+    if(el.disabled||e.button!==0||!onThumb(el,e.clientX,e.clientY))return;
+    drag={id:e.pointerId,offset:e.clientX-thumbCenter(el),start:el.value};
+    row.setPointerCapture(e.pointerId);
+    el.focus();
+    e.preventDefault();
+  });
+  row.addEventListener('pointermove',e=>{
+    if(!drag||e.pointerId!==drag.id)return;
+    const r=el.getBoundingClientRect(),min=+el.min,max=+el.max;
+    const frac=Math.min(1,Math.max(0,(e.clientX-drag.offset-r.left-THUMB/2)/(r.width-THUMB)));
+    const v=String(Math.round(min+frac*(max-min)));
+    if(v!==el.value){el.value=v;el.dispatchEvent(new Event('input',{bubbles:true}));}
+  });
+  const end=e=>{
+    if(!drag||e.pointerId!==drag.id)return;
+    const changed=el.value!==drag.start;
+    drag=null;
+    if(changed)el.dispatchEvent(new Event('change',{bubbles:true}));
+  };
+  row.addEventListener('pointerup',end);
+  row.addEventListener('pointercancel',end);
 }
 function showValue(f){const v=+$('f'+f.o).value;$('o'+f.o).textContent=f.fmt?f.fmt(v):String(v);}
 function setField(f,v){

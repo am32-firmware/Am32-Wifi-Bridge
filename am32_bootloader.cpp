@@ -54,14 +54,26 @@ void Am32Bootloader::sendPacket(const uint8_t *body, size_t len) {
   wire.write(out, frame(body, len, out));
 }
 
-// Sends a packet and listens for the reply without letting another task run
-// in between. Returns true when the reply ends with ACK_OK.
+// Sends a packet and listens for the reply. Returns true when the reply ends
+// with ACK_OK.
 bool Am32Bootloader::sendPacketExpectAck(const uint8_t *body, size_t len, uint32_t timeoutUs) {
   uint8_t out[260];
   uint8_t rx[4];
   const size_t n = wire.transfer(out, frame(body, len, out), rx, sizeof(rx), timeoutUs);
   lastReply = n > 0 ? rx[n - 1] : 0;
   return n > 0 && rx[n - 1] == ACK_OK;
+}
+
+// Line problems the UART noticed during the last transfer, for error messages.
+String Am32Bootloader::lineErrors() const {
+  String s;
+  if (wire.lastFramingError()) {
+    s += ", framing error";
+  }
+  if (wire.lastEchoError()) {
+    s += ", echo mismatch";
+  }
+  return s;
 }
 
 static String replyText(uint8_t reply) {
@@ -85,8 +97,8 @@ bool Am32Bootloader::connect() {
                                    0x0D, 'B', 'L', 'H', 'e', 'l', 'i', 0xF4, 0x7D};
   uint8_t rx[16];
   const size_t n = wire.transfer(init, sizeof(init), rx, sizeof(rx), 50000);
-  // Unlike a USB-serial adapter wired to one line we never hear our own
-  // echo, so the device info is at the start of the buffer.
+  // transfer() has already consumed our own echo, so the device info is at
+  // the start of the buffer.
   if (n < 9 || rx[8] != ACK_OK) {
     lastError = n == 0 ? "No response from ESC bootloader" : "Bad device info from ESC";
     return false;
@@ -138,12 +150,12 @@ bool Am32Bootloader::readFlash(uint16_t len, uint8_t *out) {
   uint8_t rx[259];
   const size_t n = wire.transfer(tx, frame(cmd, sizeof(cmd), tx), rx, len + 3, kReadReplyUs);
   if (n != (size_t)len + 3 || rx[len + 2] != ACK_OK) {
-    lastError = "Read failed (" + String(n) + " of " + String(len + 3) + " bytes)";
+    lastError = "Read failed (" + String(n) + " of " + String(len + 3) + " bytes)" + lineErrors();
     return false;
   }
   const uint16_t crc = rx[len] | (rx[len + 1] << 8);
   if (crc != crc16(rx, len)) {
-    lastError = "Read CRC error";
+    lastError = "Read CRC error" + lineErrors();
     return false;
   }
   memcpy(out, rx, len);
@@ -165,7 +177,7 @@ bool Am32Bootloader::readSettings(uint8_t name[32], uint8_t eeprom[48]) {
     address = eepromAddress - (addressShift ? 32 / 4 : 32);
   }
   if (!setAddress(address)) {
-    lastError = "Set address 0x" + String(address, HEX) + ": " + replyText(lastReply);
+    lastError = "Set address 0x" + String(address, HEX) + ": " + replyText(lastReply) + lineErrors();
     return false;
   }
   delay(kInterPacketDelayMs);
@@ -190,7 +202,7 @@ bool Am32Bootloader::sendDirect(const uint8_t *buf, uint16_t len, uint16_t addre
   }
 
   if (!setAddress(address)) {
-    lastError = "Set address 0x" + String(address, HEX) + ": " + replyText(lastReply);
+    lastError = "Set address 0x" + String(address, HEX) + ": " + replyText(lastReply) + lineErrors();
     return false;
   }
   delay(kInterPacketDelayMs);
@@ -202,7 +214,7 @@ bool Am32Bootloader::sendDirect(const uint8_t *buf, uint16_t len, uint16_t addre
   delay(kInterPacketDelayMs);
 
   if (!sendPacketExpectAck(buf, len, kBufferAckUs)) {
-    lastError = "Send " + String(len) + " byte buffer: " + replyText(lastReply);
+    lastError = "Send " + String(len) + " byte buffer: " + replyText(lastReply) + lineErrors();
     return false;
   }
   delay(kInterPacketDelayMs);
@@ -210,7 +222,7 @@ bool Am32Bootloader::sendDirect(const uint8_t *buf, uint16_t len, uint16_t addre
   const uint8_t prog[2] = {CMD_PROG_FLASH, 0x01};
   // Allows for a page erase before the write on the slowest parts.
   if (!sendPacketExpectAck(prog, sizeof(prog), kFlashWriteAckUs)) {
-    lastError = "Flash write at 0x" + String(address, HEX) + ": " + replyText(lastReply);
+    lastError = "Flash write at 0x" + String(address, HEX) + ": " + replyText(lastReply) + lineErrors();
     return false;
   }
   return true;

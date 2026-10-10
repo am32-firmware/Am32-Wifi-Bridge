@@ -51,6 +51,7 @@ class Am32Bootloader {
   bool readFlash(uint16_t len, uint8_t *out);
   void sendPacket(const uint8_t *body, size_t len);
   bool sendPacketExpectAck(const uint8_t *body, size_t len, uint32_t timeoutUs);
+  String lineErrors() const;
 
   uint8_t lastReply = 0;  // last byte of the most recent reply, 0 if none
 

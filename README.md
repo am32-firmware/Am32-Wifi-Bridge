@@ -13,9 +13,14 @@ over WiFi, so all you need is a phone or laptop browser.
 | GND                 | ground       |
 | GPIO 6 (`PASSTHROUGH_INPUT_PIN`) | receiver / FC signal (optional, pulled down) |
 
-No diode, resistor or TX/RX bridge is needed. The single pin is switched
-between output and input in software. A 220-1k series resistor is optional
-protection.
+No diode, resistor or TX/RX bridge is needed. The ESP32-C3's hardware UART1
+is routed to the single pin through the GPIO matrix, with TX and RX both
+attached and the pin in open-drain mode during a transaction, so WiFi
+interrupts can't disturb the serial timing. Between transactions the pin is
+driven high as a normal output. The internal pull-up holds the line high
+while the UART is talking; with long or heavily loaded signal wires, an
+external 4.7-10k pull-up to 3.3V gives sharper edges. A 220-1k series
+resistor is optional protection.
 
 ## Signal passthrough
 
@@ -103,7 +108,7 @@ instead of starting the firmware.
 
 | File | Purpose |
 |------|---------|
-| `am32_single_wire.*` | Bit-banged 19200 8N1 half-duplex serial on one GPIO |
+| `am32_single_wire.*` | 19200 8N1 half-duplex serial on one GPIO (hardware UART1, open-drain) |
 | `am32_bootloader.*`  | Port of `BF_ROOTLOADER`, `connectMotor()`, `readInitData()` and `sendDirect()` |
 | `signal_passthrough.*` | GPIO 6 -> GPIO 4 passthrough loop while WiFi is idle |
 | `web_page.h`         | UI; the settings table mirrors `Widget::eepromFieldTable()` and `defaults.h` |

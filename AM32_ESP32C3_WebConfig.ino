@@ -2,7 +2,7 @@
 //
 // Replaces the Offline-Configurator's "USB / Arduino Connect" (direct) mode:
 // the ESP32-C3 talks to the AM32 bootloader itself over the ESC signal wire
-// (bit-banged 19200 8N1, one pin switched between output and input) and
+// (hardware UART1 at 19200 8N1, TX and RX on the one pin, open-drain) and
 // serves the configuration UI over WiFi.
 //
 // While no device is connected to the WiFi, the ESP32-C3 is a signal
